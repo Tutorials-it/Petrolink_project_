@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PetroLink — Pumps Along Route (Emoji Icons)</title>
+
+<!-- Mapbox GL + Turf -->
+<link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet"/>
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+<style>
+  :root{
+    --accent:#ff7f00;
+    --card-bg:#ffffff;
+    --muted:#666;
+  }
+  body{margin:0;font-family:"Poppins",system-ui,Arial;color:#111;background:#f6f7fb}
+  header{background:#fff;border-bottom:1px solid #e6e6e6;padding:12px 16px;display:flex;align-items:center;gap:12px}
+  header img{height:34px}
+  header h1{margin:0;font-size:16px}
+  #wrap{display:flex;height:calc(100vh - 56px)}
+  #panel{width:360px;padding:14px;background:#fff;border-right:1px solid #e9e9e9;overflow:auto}
+  #map{flex:1;min-height:100%}
+  label{display:block;margin-top:12px;font-size:13px;color:#333}
+  input[type="text"]{width:100%;padding:8px;border-radius:8px;border:1px solid #ddd;margin-top:6px}
+  .row{display:flex;gap:8px;margin-top:10px}
+  button{background:var(--accent);color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;flex:1;font-weight:700}
+  .btn-muted{background:#0066cc}
+  .small{font-size:13px;color:var(--muted);margin-top:8px}
+  #pumpList{margin-top:12px}
+  .pump-card{background:#fff;border:1px solid #eee;padding:10px;border-radius:8px;margin-bottom:8px;cursor:pointer}
+  .pump-card .title{font-weight:700}
+  .filters{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .brand {border:1px solid #eee;padding:6px 8px;border-radius:8px;background:#fafafa;display:flex;align-items:center;gap:6px;cursor:pointer}
+  .muted{opacity:0.7}
+  #loading{display:none;margin-top:12px;padding:10px;background:#fff3e0;border:1px solid #ffd9b3;border-radius:8px;color:#6b3b00}
+  .legend{margin-top:12px;font-size:13px}
+  .dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .mute-btn{position:fixed;right:18px;bottom:18px;background:#0d47a1;color:#fff;padding:10px 14px;border-radius:999px;border:none;cursor:pointer}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="https://cdn-icons-png.flaticon.com/512/2967/2967898.png" alt="logo"/>
+  <h1>PetroLink — Pumps Along Route ⛽️ </h1>
+</header>
+
+<div id="wrap">
+  <aside id="panel">
+    <label>Start (city or "My Location")</label>
+    <input id="start" placeholder="e.g., Pune or My Location" />
+
+    <label>End (destination)</label>
+    <input id="end" placeholder="e.g., Solapur" />
+
+    <div class="row">
+      <button id="routeBtn">🚗 Show Route & Pumps</button>
+      <button id="myLocBtn" class="btn-muted">📍 My Location</button>
+    </div>
+
+    <div id="loading" class="muted">Loading pumps for full route area — this may take some seconds for long routes...</div>
+
+    <label style="margin-top:12px">Distance buffer (show pumps within) </label>
+    <div class="filters">
+      <label class="brand"><input type="radio" name="buf" value="1" /> <small>1 km</small></label>
+      <label class="brand"><input type="radio" name="buf" value="5" checked /> <small>5 km</small></label>
+      <label class="brand"><input type="radio" name="buf" value="10" /> <small>10 km</small></label>
+    </div>
+
+    <label style="margin-top:12px">Brand filter (toggle)</label>
+    <div id="brandFilters" class="filters"></div>
+
+    <div class="legend">
+      <div style="margin-top:8px"><span class="dot" style="background:#27ae60"></span>Green: Available</div>
+      <div style="margin-top:6px"><span class="dot" style="background:#e53935"></span>Red: Unavailable / no fuel tags</div>
+    </div>
+
+    <div id="summary" class="small muted">No route yet</div>
+
+    <div id="pumpList"></div>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<button id="muteBtn" class="mute-btn">🔊 Mute Voice</button>
+
+<script>
+/* --------------------------
+  Configuration: Mapbox token
+---------------------------*/
+mapboxgl.accessToken = "pk.eyJ1IjoidmFpc2huYXZpMjEiLCJhIjoiY21ob3hhamhvMGJvcjJsczQwY2h1Z2x2YiJ9.z-Yr9KyRjMdIy-j750zNcg";
+
+/* Map init */
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/mapbox/streets-v12',
+  center: [73.8567, 18.5204],
+  zoom: 7
+});
+map.addControl(new mapboxgl.NavigationControl());
+
+/* UI refs */
+const startInput = document.getElementById('start');
+const endInput = document.getElementById('end');
+const routeBtn = document.getElementById('routeBtn');
+const myLocBtn = document.getElementById('myLocBtn');
+const loadingEl = document.getElementById('loading');
+const summaryEl = document.getElementById('summary');
+const pumpList = document.getElementById('pumpList');
+const brandFiltersDiv = document.getElementById('brandFilters');
+const muteBtn = document.getElementById('muteBtn');
+
+let myLocation = null;         // {lng,lat}
+let routeCoordinates = null;   // array of [lng,lat]
+let allPumps = [];             // nodes from Overpass (within bbox)
+let displayedPumps = [];       // pumps filtered by buffer & brand
+let markers = [];
+let voiceEnabled = true;
+
+/* Common brands to show as checkboxes */
+const COMMON_BRANDS = ["IndianOil","HP","BharatPetrol","BPCL","Shell","Reliance","IOCL","Indian Oil","Bharat Petroleum","BP"];
+
+/* build brand checkboxes default all checked */
+let activeBrands = new Set(COMMON_BRANDS.map(b=>b.toLowerCase()));
+COMMON_BRANDS.forEach(brand=>{
+  const id = 'br_'+brand.replace(/\s+/g,'_');
+  const wrapper = document.createElement('label');
+  wrapper.className = 'brand';
+  wrapper.innerHTML = `<input type="checkbox" id="${id}" value="${brand}" checked /> <small>${brand}</small>`;
+  brandFiltersDiv.appendChild(wrapper);
+  wrapper.querySelector('input').addEventListener('change', (e)=>{
+    if(e.target.checked) activeBrands.add(brand.toLowerCase());
+    else activeBrands.delete(brand.toLowerCase());
+    applyFiltersAndRender();
+  });
+});
+
+/* Mute toggle */
+muteBtn.addEventListener('click', ()=>{
+  voiceEnabled = !voiceEnabled;
+  muteBtn.textContent = voiceEnabled ? '🔊 Mute Voice' : '🔈 Unmute Voice';
+  if(!voiceEnabled) speechSynthesis.cancel();
+});
+
+/* helper speak */
+function speak(text){
+  if(!voiceEnabled) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-IN';
+  u.rate = 1;
+  speechSynthesis.speak(u);
+}
+
+/* My Location */
+myLocBtn.addEventListener('click', ()=>{
+  if(!navigator.geolocation){ alert('Geolocation not supported'); return; }
+  navigator.geolocation.getCurrentPosition(p=>{
+    myLocation = { lng: p.coords.longitude, lat: p.coords.latitude };
+    startInput.value = 'My Location';
+    map.flyTo({ center: [myLocation.lng, myLocation.lat], zoom: 13 });
+    new mapboxgl.Marker({ color:'#0b67d0' }).setLngLat([myLocation.lng, myLocation.lat]).addTo(map);
+  }, err => alert('Could not get location: '+err.message));
+});
+
+/* Geocode helper (Mapbox) -> returns [lng,lat] or null */
+async function geocode(q){
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${mapboxgl.accessToken}&limit=1`;
+  const res = await fetch(url);
+  const j = await res.json();
+  return j.features?.[0]?.center || null;
+}
+
+/* Get full route geometry from Mapbox Directions -> returns array [lng,lat] */
+async function getRouteCoords(startLngLat, endLngLat){
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${startLngLat[0]},${startLngLat[1]};${endLngLat[0]},${endLngLat[1]}?geometries=geojson&overview=full&access_token=${mapboxgl.accessToken}`;
+  const res = await fetch(url);
+  const j = await res.json();
+  if(!j.routes || !j.routes[0]) throw new Error('No route');
+  return j.routes[0].geometry.coordinates;
+}
+
+/* Draw route line */
+function drawRoute(coords){
+  if(map.getSource('route')){
+    if(map.getLayer('route')) map.removeLayer('route');
+    map.removeSource('route');
+  }
+  map.addSource('route',{ type:'geojson', data:{ type:'Feature', geometry:{ type:'LineString', coordinates: coords } } });
+  map.addLayer({ id:'route', type:'line', source:'route', paint:{ 'line-color':'#ff7f00', 'line-width':5 } });
+  // fit bounds
+  const b = coords.reduce((bb, c) => bb.extend(c), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+  map.fitBounds(b, { padding: 60 });
+}
+
+/* Compute bbox expanded by marginMeters (for Overpass fetch) */
+function computeExpandedBBox(coords, marginMeters=20000){
+  const lons = coords.map(c=>c[0]), lats = coords.map(c=>c[1]);
+  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const expandLat = marginMeters / 111320; // degrees approx
+  const midLat = (minLat + maxLat)/2;
+  const expandLon = marginMeters / (111320 * Math.cos(midLat * Math.PI/180));
+  return { south: minLat - expandLat, west: minLon - expandLon, north: maxLat + expandLat, east: maxLon + expandLon };
+}
+
+/* Fetch all nodes amenity=fuel in bbox via Overpass */
+async function fetchPumpsInBBox(bbox){
+  const bboxStr = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
+  const q = `[out:json][timeout:120];node[amenity=fuel](${bboxStr});out;`;
+  const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`;
+  const res = await fetch(url);
+  const j = await res.json();
+  return j.elements || [];
+}
+
+/* Determine availability using opening_hours and fuel:* tags */
+function isAvailable(node){
+  const tags = node.tags || {};
+  const hasFuel = Object.keys(tags).some(k => k.startsWith('fuel:') && (tags[k] === 'yes' || tags[k] === 'true' || tags[k] === 'available'));
+  if(tags.opening_hours){
+    const oh = tags.opening_hours.toLowerCase();
+    if(oh.includes('24/7') || oh.includes('24h') || oh.includes('24 hr')) return true;
+    if(oh.includes('closed') || oh.includes('off')) return false;
+    // otherwise ignore and rely on fuel tag
+  }
+  return hasFuel;
+}
+
+/* get brand/normalized string */
+function getBrand(node){
+  const t = node.tags || {};
+  const cands = [t.brand, t.operator, t.name];
+  for(const v of cands){
+    if(!v) continue;
+    const s = v.toString();
+    return s;
+  }
+  return null;
+}
+
+/* Clear markers */
+function clearMarkers(){ markers.forEach(m=>m.remove()); markers = []; }
+
+/* Distance point->line (km) using turf */
+function distancePointToRouteKm(lonlat, lineCoords){
+  try{
+    const pt = turf.point(lonlat);
+    const line = turf.lineString(lineCoords);
+    return turf.pointToLineDistance(pt, line, { units: 'kilometers' });
+  } catch(e){
+    // fallback to vertex distance
+    let minD = Infinity;
+    for(const c of lineCoords){
+      const d = haversineKm(c[1], c[0], lonlat[1], lonlat[0]);
+      if(d < minD) minD = d;
+    }
+    return minD;
+  }
+}
+
+/* haversine km */
+function haversineKm(aLat,aLon,bLat,bLon){
+  const R=6371;
+  const dLat=(bLat-aLat)*Math.PI/180;
+  const dLon=(bLon-aLon)*Math.PI/180;
+  const A=Math.sin(dLat/2)**2 + Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(A));
+}
+
+/* Apply buffer and brand filters and render markers + list */
+function applyFiltersAndRender(){
+  if(!routeCoordinates || !allPumps.length){ return; }
+  clearMarkers();
+  pumpList.innerHTML = '';
+  // selected buffer km
+  const buf = parseFloat(document.querySelector('input[name="buf"]:checked').value);
+  const filtered = [];
+  for(const node of allPumps){
+    const distKm = distancePointToRouteKm([node.lon, node.lat], routeCoordinates);
+    if(distKm <= buf){
+      const brand = getBrand(node);
+      // brand filter: if any common brands are selected, only show matching ones; if none selected (all unchecked) treat as show all
+      if(activeBrands.size > 0){
+        // if brand exists, check lowercase partial match
+        if(brand){
+          const bnorm = brand.toLowerCase();
+          const matches = Array.from(activeBrands).some(ab => bnorm.includes(ab.replace(/\s+/g,'')) || bnorm.includes(ab));
+          if(!matches) continue;
+        } else {
+          // if node has no brand, show it only if activeBrands includes 'other' — we didn't include 'other', so skip
+          continue;
+        }
+      }
+      filtered.push({ node, distKm });
+    }
+  }
+
+  // sort by distance from route (closest first)
+  filtered.sort((a,b)=>a.distKm - b.distKm);
+  displayedPumps = filtered;
+
+  document.getElementById('summary').textContent = `Showing ${filtered.length} pumps within ${document.querySelector('input[name="buf"]:checked').value} km of route.`;
+  speak(`Found ${filtered.length} petrol pumps along the highlighted route.`);
+
+  // nearest pump to route start (if any): compute distance from start
+  if(filtered.length>0){
+    const start = routeCoordinates[0];
+    let nearest = filtered[0];
+    let minStartD = haversineKm(start[1], start[0], nearest.node.lat, nearest.node.lon);
+    for(const f of filtered){
+      const d = haversineKm(start[1], start[0], f.node.lat, f.node.lon);
+      if(d < minStartD){ minStartD = d; nearest = f; }
+    }
+    speak(`Nearest pump is ${nearest.node.tags?.name || 'Unnamed pump'}, ${minStartD.toFixed(1)} kilometers from start.`);
+  }
+
+  // create markers and list
+  for(const f of filtered){
+    const node = f.node;
+    const name = node.tags?.name || node.tags?.operator || 'Petrol Pump';
+    const brand = getBrand(node) || '';
+    const avail = isAvailable(node);
+    const color = avail ? '#27ae60' : '#e53935';
+
+    // emoji marker element
+    const el = document.createElement('div');
+    el.style.fontSize = '22px';
+    el.style.lineHeight = '22px';
+    el.style.textAlign = 'center';
+    el.style.transform = 'translateY(-2px)';
+    el.textContent = '⛽️';
+    // color circle background
+    el.style.width = '36px';
+    el.style.height = '36px';
+    el.style.borderRadius = '50%';
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.justifyContent = 'center';
+    el.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15)';
+    el.style.background = '#fff';
+    el.style.border = `3px solid ${color}`;
+
+    const marker = new mapboxgl.Marker({ element: el })
+      .setLngLat([node.lon, node.lat])
+      .setPopup(new mapboxgl.Popup({ offset: 12 }).setHTML(
+        `<strong>${escapeHtml(name)}</strong><br><small>${escapeHtml(brand)}</small><br>
+         <small>Dist to route: ${f.distKm.toFixed(2)} km</small><br>
+         <small style="color:${avail? '#2e7d32':'#c62828'}">${avail? 'Available' : 'Unavailable'}</small>`
+      ))
+      .addTo(map);
+    markers.push(marker);
+
+    // list card
+    const card = document.createElement('div');
+    card.className = 'pump-card';
+    const start = routeCoordinates[0];
+    const distFromStart = haversineKm(start[1], start[0], node.lat, node.lon).toFixed(2);
+    card.innerHTML = `<div class="title">${escapeHtml(name)} ${brand ? `<span style="font-weight:600;color:#666">(${escapeHtml(brand)})</span>` : ''}</div>
+                      <div class="small muted">Distance from route: <strong>${f.distKm.toFixed(2)} km</strong> • From start: <strong>${distFromStart} km</strong></div>
+                      <div style="margin-top:6px"><span style="color:${avail? '#2e7d32':'#c62828'}">${avail? '🟢 Available' : '🔴 Unavailable'}</span></div>`;
+    card.addEventListener('click', async ()=>{
+      marker.togglePopup();
+      map.flyTo({ center: [node.lon, node.lat], zoom: 14 });
+      // compute driving distance/time from route start to this pump (on-demand)
+      try{
+        const startPt = routeCoordinates[0];
+        const info = await getDrivingInfo([startPt[0], startPt[1]], [node.lon, node.lat]);
+        const km = (info.distance/1000).toFixed(1);
+        const mins = Math.round(info.duration/60);
+        marker.setPopup(new mapboxgl.Popup({ offset:12 }).setHTML(
+          `<strong>${escapeHtml(name)}</strong><br><small>${escapeHtml(brand)}</small><br>
+           <small>Driving: ${km} km, ~${mins} min</small><br>
+           <small style="color:${avail? '#2e7d32':'#c62828'}">${avail? 'Available' : 'Unavailable'}</small>`
+        ));
+        marker.togglePopup();
+        speak(`${name}. Driving distance ${km} kilometers. Estimated ${mins} minutes.`);
+      } catch(e){ console.warn('driving info error', e); }
+    });
+    pumpList.appendChild(card);
+  }
+
+  if(filtered.length === 0){
+    pumpList.innerHTML = `<div class="small muted">No petrol pumps within selected buffer of the route.</div>`;
+  }
+}
+
+/* Mapbox Directions driving info */
+async function getDrivingInfo(startLngLat, endLngLat){
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${startLngLat[0]},${startLngLat[1]};${endLngLat[0]},${endLngLat[1]}?overview=false&access_token=${mapboxgl.accessToken}`;
+  const r = await fetch(url);
+  const j = await r.json();
+  if(!j.routes || !j.routes[0]) throw new Error('No driving route');
+  return j.routes[0]; // {distance, duration}
+}
+
+/* escape html */
+function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* MAIN: when user clicks Show Route & Pumps */
+routeBtn.addEventListener('click', async ()=>{
+  const startText = startInput.value.trim();
+  const endText = endInput.value.trim();
+  if(!startText || !endText) return alert('Please enter both start and end locations.');
+
+  try{
+    loadingEl.style.display = 'block';
+    pumpList.innerHTML = '';
+    summaryEl.textContent = 'Calculating route...';
+    clearMarkers();
+
+    // resolve start coords
+    let startCoords;
+    if(startText.toLowerCase() === 'my location' && myLocation){
+      startCoords = [myLocation.lng, myLocation.lat];
+    } else {
+      startCoords = await geocode(startText);
+      if(!startCoords){ loadingEl.style.display='none'; return alert('Could not find start location'); }
+    }
+    // resolve end coords
+    const endCoords = await geocode(endText);
+    if(!endCoords){ loadingEl.style.display='none'; return alert('Could not find end location'); }
+
+    // get full route
+    routeCoordinates = await getRouteCoords(startCoords, endCoords);
+    drawRoute(routeCoordinates);
+
+    summaryEl.textContent = 'Fetching pumps in expanded route area (this may take some seconds)...';
+
+    // compute bbox expanded by margin (we use 20 km to cover reasonable corridor)
+    const bbox = computeExpandedBBox(routeCoordinates, 20000);
+    // fetch all nodes in bbox via Overpass
+    const nodes = await fetchPumpsInBBox(bbox);
+    allPumps = nodes;
+    summaryEl.textContent = `Fetched ${nodes.length} nodes from OSM; filtering to buffers...`;
+
+    // hide loading
+    loadingEl.style.display = 'none';
+
+    // apply filters & render (uses currently selected buffer & brands)
+    applyFiltersAndRender();
+
+  } catch(err){
+    loadingEl.style.display = 'none';
+    console.error(err);
+    alert('Error: ' + (err.message || err));
+  }
+});
+
+/* small helper: geocode + getRouteCoords reused above */
+/* geocode already defined earlier? define now (we used above too) */
+async function geocode(q){
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${mapboxgl.accessToken}&limit=1`;
+  const r = await fetch(url);
+  const j = await r.json();
+  return j.features?.[0]?.center || null;
+}
+async function getRouteCoords(start,end){
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&overview=full&access_token=${mapboxgl.accessToken}`;
+  const r = await fetch(url);
+  const j = await r.json();
+  if(!j.routes || !j.routes[0]) throw new Error('No route returned');
+  return j.routes[0].geometry.coordinates;
+}
+
+/* get user location initially (non-blocking) */
+if(navigator.geolocation){
+  navigator.geolocation.getCurrentPosition(p => { myLocation = { lng:p.coords.longitude, lat:p.coords.latitude }; }, ()=>{/*ignore*/});
+}
+
+/* react to buffer radio change */
+document.querySelectorAll('input[name="buf"]').forEach(inp=>{
+  inp.addEventListener('change', ()=> applyFiltersAndRender());
+});
+
+/* done */
+console.log('PetroLink loaded — ready.');
+</script>
+</body>
+</html>

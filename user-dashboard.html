@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PetroLink — Dashboard</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link href="assets/css/style.css" rel="stylesheet">
+
+  <style>
+    body,html{height:100%}
+    .topbar{ display:flex; justify-content:space-between; align-items:center; padding:12px 20px; background:#062038; color:#fff; }
+    .topbar .brand{ font-weight:700; font-size:20px; color:#7ee08a; }
+    .topbar .actions { display:flex; gap:12px; align-items:center; }
+    #map { height: calc(100vh - 72px); width:100%; }
+    .sidebar {
+      position:absolute; left:18px; top:82px; z-index:1200; background:rgba(255,255,255,0.98); padding:14px; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.12);
+      width:320px; max-height:70vh; overflow:auto;
+    }
+    .pump { padding:10px 6px; border-bottom:1px solid #eef2f6; }
+    .pump h4{ margin:0 0 6px 0; font-size:15px; color:#10324a;}
+    .status-open{ color: #18803b; font-weight:700; }
+    .status-closed{ color: #b91c1c; font-weight:700; }
+    .btn{ background:#2fb86a;color:#fff;padding:8px 12px;border-radius:6px;border:0; cursor:pointer; }
+    .muted{ color:#667085; font-size:13px;}
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">PetroLink</div>
+    <div class="actions">
+      <div id="userName" style="margin-right:12px"></div>
+      <button class="btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="sidebar" id="sidebar">
+    <h3 style="margin-top:0">Nearby Pumps</h3>
+    <div id="pumpList"></div>
+    <div style="padding-top:8px"><small class="muted">Markers: <span id="markerCount">0</span></small></div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+  // Simple session check
+  const session = JSON.parse(sessionStorage.getItem('petrolink_session') || 'null');
+  if(!session){ window.location.href = 'user-login.html'; }
+  else { document.getElementById('userName').innerText = 'Hello, ' + session.name; }
+
+  // Sample pump data (you can extend this or fetch from server later)
+  const pumps = [
+    { id:1, name:"PetroLink Station - City Center", lat:19.0760, lng:72.8777, status:"open", fuels:["Petrol","Diesel"], cngCapacity:"1200 kg", price:{petrol:110.4,diesel:95.2}, nearbyRestaurants:["Cafe A (200m)","Dosa Corner (350m)"] },
+    { id:2, name:"FuelPoint - Western Highway", lat:19.0805, lng:72.8500, status:"closed", fuels:["Petrol","Diesel"], cngCapacity:"800 kg", price:{petrol:111.0,diesel:96.0}, nearbyRestaurants:["Highway Dhaba (500m)"] },
+    { id:3, name:"GreenFuel - Airport Road", lat:19.0890, lng:72.8650, status:"open", fuels:["Petrol","Diesel","CNG"], cngCapacity:"2000 kg", price:{petrol:109.8,diesel:94.0,cng:71.5}, nearbyRestaurants:["Airport Deli (150m)","Burger Stop (220m)"] }
+  ];
+
+  // init map
+  const map = L.map('map', { zoomControl:true }).setView([19.0760,72.8777], 13);
+
+  // OpenStreetMap tiles
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // custom colored icons
+  const greenIcon = new L.Icon({
+    iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+    iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34], shadowUrl:'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png', shadowSize:[41,41]
+  });
+  const redIcon = new L.Icon({
+    iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
+    iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34], shadowUrl:'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png', shadowSize:[41,41]
+  });
+
+  // user marker
+  let userMarker;
+
+  function showPumps(centerLatLng){
+    // clear existing pump markers (remove all layers except tiles and user)
+    pumpLayerGroup && pumpLayerGroup.clearLayers();
+    pumpLayerGroup = L.layerGroup().addTo(map);
+
+    const listEl = document.getElementById('pumpList');
+    listEl.innerHTML = '';
+
+    pumps.forEach(p => {
+      const isOpen = p.status === 'open';
+      const icon = isOpen ? greenIcon : redIcon;
+
+      const marker = L.marker([p.lat,p.lng], { icon }).addTo(pumpLayerGroup);
+
+      const popupHtml = `
+        <div style="min-width:200px">
+          <strong>${p.name}</strong><br/>
+          <span class="${isOpen ? 'status-open' : 'status-closed'}">${p.status.toUpperCase()}</span>
+          <hr style="margin:8px 0"/>
+          <div><strong>Fuels:</strong> ${p.fuels.join(', ')}</div>
+          <div><strong>CNG capacity:</strong> ${p.cngCapacity || 'N/A'}</div>
+          <div><strong>Prices:</strong> ${Object.entries(p.price).map(([k,v])=> `${k}: ${v}`).join(' | ')}</div>
+          <div style="margin-top:8px"><strong>Nearby:</strong><br/>${p.nearbyRestaurants.join('<br/>')}</div>
+          <div style="margin-top:8px"><button class="btn" onclick="centerTo(${p.lat},${p.lng})">Go to pump</button></div>
+        </div>
+      `;
+      marker.bindPopup(popupHtml);
+
+      // distance from user if available
+      let distanceText = '';
+      if(centerLatLng){
+        const d = map.distance(centerLatLng, L.latLng(p.lat,p.lng));
+        distanceText = `<div class="muted">Distance: ${(d/1000).toFixed(2)} km</div>`;
+      }
+
+      // add pump item in sidebar
+      const pumpItem = document.createElement('div');
+      pumpItem.className = 'pump';
+      pumpItem.innerHTML = `<h4>${p.name} <span style="float:right" class="${isOpen ? 'status-open' : 'status-closed'}">${p.status}</span></h4>
+        ${distanceText}
+        <div class="muted">${p.fuels.join(', ')} · CNG cap: ${p.cngCapacity}</div>
+        <div style="margin-top:6px"><button onclick="panToMarker(${p.lat},${p.lng})" class="btn">View on map</button></div>
+      `;
+      listEl.appendChild(pumpItem);
+    });
+
+    document.getElementById('markerCount').innerText = pumps.length;
+  }
+
+  function panToMarker(lat,lng){
+    map.setView([lat,lng],15, { animate:true });
+  }
+  function centerTo(lat,lng){ map.setView([lat,lng],16); }
+
+  // layer group holder
+  let pumpLayerGroup = L.layerGroup().addTo(map);
+
+  // Try to detect user location
+  map.locate({ setView:false, maxZoom:16 });
+
+  // on success, add user marker and show pump distances sorted by proximity
+  map.on('locationfound', function(e){
+    const latlng = e.latlng;
+    if(userMarker) map.removeLayer(userMarker);
+    userMarker = L.marker(latlng).addTo(map).bindPopup('You are here').openPopup();
+
+    // sort pumps by distance
+    pumps.sort((a,b)=>{
+      const da = map.distance(latlng, L.latLng(a.lat,a.lng));
+      const db = map.distance(latlng, L.latLng(b.lat,b.lng));
+      return da-db;
+    });
+
+    showPumps(latlng);
+  });
+
+  map.on('locationerror', function(){
+    // if denied, still show pumps with default center
+    showPumps(null);
+  });
+
+  // initial show (without user location)
+  showPumps(null);
+
+  function logout(){ sessionStorage.removeItem('petrolink_session'); window.location.href='user-login.html'; }
+
+  </script>
+</body>
+</html>

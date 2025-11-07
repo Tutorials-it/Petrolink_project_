@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PetroLink - Login</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: "Poppins", sans-serif;
+    }
+
+    body {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: 
+        /* linear-gradient(120deg, rgba(0,114,255,0.6), rgba(0,198,255,0.6), rgba(255,128,8,0.6), rgba(255,102,0,0.6)), */
+        url('assets/img/p4.webp');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+      animation: moveBg 10s ease infinite;
+      color: #fff;
+    }
+
+    @keyframes moveBg {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .main-container {
+      display: flex;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      box-shadow: 0 0 25px rgba(0,0,0,0.4);
+      overflow: hidden;
+      backdrop-filter: blur(12px);
+      width: 900px;
+      max-width: 95%;
+      animation: fadeIn 1.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .left-section {
+      flex: 1;
+      background: rgba(255,255,255,0.1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .left-section img {
+      width: 180px;
+      margin-bottom: 20px;
+      animation: floatLogo 3s ease-in-out infinite;
+    }
+
+    @keyframes floatLogo {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    .left-section h2 {
+      color: #023752;
+      font-size: 28px;
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+    }
+
+    .left-section p {
+      color: #120e05;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .right-section {
+      flex: 1;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      background: rgba(255,255,255,0.2);
+    }
+
+    .right-section h2 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #043072;
+      font-weight: 600;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 12px;
+      margin: 8px 0;
+      border: none;
+      border-radius: 8px;
+      outline: none;
+      font-size: 15px;
+      background: rgba(255,255,255,0.85);
+      color: #333;
+      transition: 0.3s;
+    }
+
+    input:focus, select:focus {
+      background: #fff;
+      box-shadow: 0 0 8px rgba(255,102,0,0.5);
+    }
+
+    button {
+      background-color: #0037ff;
+      color: #fff;
+      border: none;
+      padding: 12px;
+      width: 100%;
+      border-radius: 8px;
+      font-size: 17px;
+      margin-top: 10px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    button:hover {
+      background-color: #ff4500;
+      transform: scale(1.05);
+    }
+
+    #location {
+      text-align: center;
+      margin-top: 5px;
+      font-size: 13px;
+      color: #fff;
+    }
+
+    .footer {
+      position: absolute;
+      bottom: 10px;
+      width: 100%;
+      text-align: center;
+      color: #fff;
+      font-size: 13px;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+
+    a {
+      color: #fff;
+      text-decoration: underline;
+    }
+
+    @media (max-width: 768px) {
+      .main-container {
+        flex-direction: column;
+        width: 95%;
+      }
+      .left-section {
+        display: none;
+      }
+      .right-section {
+        padding: 30px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="main-container">
+    <!-- Left side with illustration -->
+    <div class="left-section">
+      <img src="https://cdn-icons-png.flaticon.com/512/2967/2967898.png" alt="Petrol Pump Logo">
+      <h2>Welcome to PetroLink</h2>
+      <p>Refuel Smarter. Drive Further.<br>Locate nearby petrol pumps & facilities instantly.</p>
+    </div>
+
+    <!-- Right side login form -->
+    <div class="right-section">
+      <h2>Login to Continue</h2>
+      <input type="email" id="email" placeholder="Email" required>
+      <input type="password" id="password" placeholder="Password" required>
+      <input type="tel" id="phone" placeholder="Phone Number" required>
+
+      <select id="fuelType" required>
+        <option value="">Select Fuel Type</option>
+        <option value="Petrol">Petrol</option>
+        <option value="Diesel">Diesel</option>
+        <option value="CNG">CNG</option>
+        <option value="Electric">Electric</option>
+      </select>
+
+      <select id="vehicleType" required>
+        <option value="">Select Vehicle Type</option>
+        <option value="Car">Car</option>
+        <option value="Bike">Bike</option>
+        <option value="Truck">Truck</option>
+        <option value="Bus">Bus</option>
+      </select>
+
+      <button onclick="getLocation()">Detect My Location</button>
+      <div id="location">Location: Not detected</div>
+
+      <button onclick="loginUser()">Login</button>
+      <p style="text-align:center; margin-top:10px;">Don’t have an account? <a href="register.html">Register</a></p>
+    </div>
+  </div>
+
+  <div class="footer">
+    © 2025 PetroLink | Powering Every Journey 🚗⛽
+  </div>
+
+  <script>
+    let userLocation = null;
+
+    // Get live location
+    function getLocation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            userLocation = { lat, lon };
+            document.getElementById("location").innerText =
+              `Location: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+          },
+          () => {
+            alert("Location access denied. Please enable GPS.");
+          }
+        );
+      } else {
+        alert("Geolocation not supported by this browser.");
+      }
+    }
+
+    // Login function
+    function loginUser() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      const phone = document.getElementById("phone").value;
+      const fuelType = document.getElementById("fuelType").value;
+      const vehicleType = document.getElementById("vehicleType").value;
+
+      if (!email || !password || !phone || !fuelType || !vehicleType) {
+        alert("Please fill all fields!");
+        return;
+      }
+
+      let users = JSON.parse(localStorage.getItem("users") || "[]");
+      let validUser = users.find(u => u.email === email && u.password === password);
+
+      if (!validUser) {
+        alert("Invalid credentials!");
+        return;
+      }
+
+      localStorage.setItem("loggedInUser", JSON.stringify({ ...validUser, fuelType, vehicleType, userLocation }));
+      alert("Login successful!");
+      window.location.href = "map.html";
+    }
+  </script>
+
+</body>
+</html>
